@@ -5,6 +5,7 @@
 #import "FLTVideoPlayerPlugin.h"
 
 #import <AVFoundation/AVFoundation.h>
+#import <AmazonIVSPlayer/AmazonIVSPlayer.h>
 #import <GLKit/GLKit.h>
 
 #import "AVAssetTrackUtils.h"
@@ -33,15 +34,15 @@
 }
 @end
 
-@interface FLTVideoPlayer : NSObject <FlutterTexture, FlutterStreamHandler>
-@property(readonly, nonatomic) AVPlayer *player;
+@interface FLTVideoPlayer : NSObject <FlutterTexture, FlutterStreamHandler,IVSPlayerDelegate>
+@property(readonly, nonatomic) IVSPlayer *player;
 @property(readonly, nonatomic) AVPlayerItemVideoOutput *videoOutput;
 // This is to fix 2 bugs: 1. blank video for encrypted video streams on iOS 16
 // (https://github.com/flutter/flutter/issues/111457) and 2. swapped width and height for some video
 // streams (not just iOS 16).  (https://github.com/flutter/flutter/issues/109116).
 // An invisible AVPlayerLayer is used to overwrite the protection of pixel buffers in those streams
 // for issue #1, and restore the correct width and height for issue #2.
-@property(readonly, nonatomic) AVPlayerLayer *playerLayer;
+@property(readonly, nonatomic) IVSPlayerView *playerLayer;
 @property(readonly, nonatomic) CADisplayLink *displayLink;
 @property(nonatomic) FlutterEventChannel *eventChannel;
 @property(nonatomic) FlutterEventSink eventSink;
@@ -196,65 +197,74 @@ NS_INLINE UIViewController *rootViewController() {
 - (instancetype)initWithURL:(NSURL *)url
                frameUpdater:(FLTFrameUpdater *)frameUpdater
                 httpHeaders:(nonnull NSDictionary<NSString *, NSString *> *)headers {
+    self = [super init];
+    
   NSDictionary<NSString *, id> *options = nil;
   if ([headers count] != 0) {
     options = @{@"AVURLAssetHTTPHeaderFieldsKey" : headers};
   }
-  AVURLAsset *urlAsset = [AVURLAsset URLAssetWithURL:url options:options];
-  AVPlayerItem *item = [AVPlayerItem playerItemWithAsset:urlAsset];
-  return [self initWithPlayerItem:item frameUpdater:frameUpdater];
+  _player = [[IVSPlayer alloc] init];
+    
+    _player.delegate = self;
+    NSLog(@"play url: %@", url);
+    [_player load:url];
+    _playerLayer.player = _player;
+    [rootViewController().view.layer addSublayer:_playerLayer.layer];
+    [self createVideoOutputAndDisplayLink:frameUpdater];
+    
+  return self;
 }
 
 - (instancetype)initWithPlayerItem:(AVPlayerItem *)item
                       frameUpdater:(FLTFrameUpdater *)frameUpdater {
   self = [super init];
-  NSAssert(self, @"super init cannot be nil");
-
-  AVAsset *asset = [item asset];
-  void (^assetCompletionHandler)(void) = ^{
-    if ([asset statusOfValueForKey:@"tracks" error:nil] == AVKeyValueStatusLoaded) {
-      NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeVideo];
-      if ([tracks count] > 0) {
-        AVAssetTrack *videoTrack = tracks[0];
-        void (^trackCompletionHandler)(void) = ^{
-          if (self->_disposed) return;
-          if ([videoTrack statusOfValueForKey:@"preferredTransform"
-                                        error:nil] == AVKeyValueStatusLoaded) {
-            // Rotate the video by using a videoComposition and the preferredTransform
-            self->_preferredTransform = FLTGetStandardizedTransformForTrack(videoTrack);
-            // Note:
-            // https://developer.apple.com/documentation/avfoundation/avplayeritem/1388818-videocomposition
-            // Video composition can only be used with file-based media and is not supported for
-            // use with media served using HTTP Live Streaming.
-            AVMutableVideoComposition *videoComposition =
-                [self getVideoCompositionWithTransform:self->_preferredTransform
-                                             withAsset:asset
-                                        withVideoTrack:videoTrack];
-            item.videoComposition = videoComposition;
-          }
-        };
-        [videoTrack loadValuesAsynchronouslyForKeys:@[ @"preferredTransform" ]
-                                  completionHandler:trackCompletionHandler];
-      }
-    }
-  };
-
-  _player = [AVPlayer playerWithPlayerItem:item];
-  _player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
-
-  // This is to fix 2 bugs: 1. blank video for encrypted video streams on iOS 16
-  // (https://github.com/flutter/flutter/issues/111457) and 2. swapped width and height for some
-  // video streams (not just iOS 16).  (https://github.com/flutter/flutter/issues/109116). An
-  // invisible AVPlayerLayer is used to overwrite the protection of pixel buffers in those streams
-  // for issue #1, and restore the correct width and height for issue #2.
-  _playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
-  [rootViewController().view.layer addSublayer:_playerLayer];
-
-  [self createVideoOutputAndDisplayLink:frameUpdater];
-
-  [self addObservers:item];
-
-  [asset loadValuesAsynchronouslyForKeys:@[ @"tracks" ] completionHandler:assetCompletionHandler];
+//  NSAssert(self, @"super init cannot be nil");
+//
+//  AVAsset *asset = [item asset];
+//  void (^assetCompletionHandler)(void) = ^{
+//    if ([asset statusOfValueForKey:@"tracks" error:nil] == AVKeyValueStatusLoaded) {
+//      NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+//      if ([tracks count] > 0) {
+//        AVAssetTrack *videoTrack = tracks[0];
+//        void (^trackCompletionHandler)(void) = ^{
+//          if (self->_disposed) return;
+//          if ([videoTrack statusOfValueForKey:@"preferredTransform"
+//                                        error:nil] == AVKeyValueStatusLoaded) {
+//            // Rotate the video by using a videoComposition and the preferredTransform
+//            self->_preferredTransform = FLTGetStandardizedTransformForTrack(videoTrack);
+//            // Note:
+//            // https://developer.apple.com/documentation/avfoundation/avplayeritem/1388818-videocomposition
+//            // Video composition can only be used with file-based media and is not supported for
+//            // use with media served using HTTP Live Streaming.
+//            AVMutableVideoComposition *videoComposition =
+//                [self getVideoCompositionWithTransform:self->_preferredTransform
+//                                             withAsset:asset
+//                                        withVideoTrack:videoTrack];
+//            item.videoComposition = videoComposition;
+//          }
+//        };
+//        [videoTrack loadValuesAsynchronouslyForKeys:@[ @"preferredTransform" ]
+//                                  completionHandler:trackCompletionHandler];
+//      }
+//    }
+//  };
+//
+//  _player = [AVPlayer playerWithPlayerItem:item];
+//  _player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
+//
+//  // This is to fix 2 bugs: 1. blank video for encrypted video streams on iOS 16
+//  // (https://github.com/flutter/flutter/issues/111457) and 2. swapped width and height for some
+//  // video streams (not just iOS 16).  (https://github.com/flutter/flutter/issues/109116). An
+//  // invisible AVPlayerLayer is used to overwrite the protection of pixel buffers in those streams
+//  // for issue #1, and restore the correct width and height for issue #2.
+//  _playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
+//  [rootViewController().view.layer addSublayer:_playerLayer];
+//
+//  [self createVideoOutputAndDisplayLink:frameUpdater];
+//
+//  [self addObservers:item];
+//
+//  [asset loadValuesAsynchronouslyForKeys:@[ @"tracks" ] completionHandler:assetCompletionHandler];
 
   return self;
 }
@@ -263,61 +273,61 @@ NS_INLINE UIViewController *rootViewController() {
                       ofObject:(id)object
                         change:(NSDictionary *)change
                        context:(void *)context {
-  if (context == timeRangeContext) {
-    if (_eventSink != nil) {
-      NSMutableArray<NSArray<NSNumber *> *> *values = [[NSMutableArray alloc] init];
-      for (NSValue *rangeValue in [object loadedTimeRanges]) {
-        CMTimeRange range = [rangeValue CMTimeRangeValue];
-        int64_t start = FLTCMTimeToMillis(range.start);
-        [values addObject:@[ @(start), @(start + FLTCMTimeToMillis(range.duration)) ]];
-      }
-      _eventSink(@{@"event" : @"bufferingUpdate", @"values" : values});
-    }
-  } else if (context == statusContext) {
-    AVPlayerItem *item = (AVPlayerItem *)object;
-    switch (item.status) {
-      case AVPlayerItemStatusFailed:
-        if (_eventSink != nil) {
-          _eventSink([FlutterError
-              errorWithCode:@"VideoError"
-                    message:[@"Failed to load video: "
-                                stringByAppendingString:[item.error localizedDescription]]
-                    details:nil]);
-        }
-        break;
-      case AVPlayerItemStatusUnknown:
-        break;
-      case AVPlayerItemStatusReadyToPlay:
-        [item addOutput:_videoOutput];
-        [self setupEventSinkIfReadyToPlay];
-        [self updatePlayingState];
-        break;
-    }
-  } else if (context == presentationSizeContext || context == durationContext) {
-    AVPlayerItem *item = (AVPlayerItem *)object;
-    if (item.status == AVPlayerItemStatusReadyToPlay) {
-      // Due to an apparent bug, when the player item is ready, it still may not have determined
-      // its presentation size or duration. When these properties are finally set, re-check if
-      // all required properties and instantiate the event sink if it is not already set up.
-      [self setupEventSinkIfReadyToPlay];
-      [self updatePlayingState];
-    }
-  } else if (context == playbackLikelyToKeepUpContext) {
-    if ([[_player currentItem] isPlaybackLikelyToKeepUp]) {
-      [self updatePlayingState];
-      if (_eventSink != nil) {
-        _eventSink(@{@"event" : @"bufferingEnd"});
-      }
-    }
-  } else if (context == playbackBufferEmptyContext) {
-    if (_eventSink != nil) {
-      _eventSink(@{@"event" : @"bufferingStart"});
-    }
-  } else if (context == playbackBufferFullContext) {
-    if (_eventSink != nil) {
-      _eventSink(@{@"event" : @"bufferingEnd"});
-    }
-  }
+//  if (context == timeRangeContext) {
+//    if (_eventSink != nil) {
+//      NSMutableArray<NSArray<NSNumber *> *> *values = [[NSMutableArray alloc] init];
+//      for (NSValue *rangeValue in [object loadedTimeRanges]) {
+//        CMTimeRange range = [rangeValue CMTimeRangeValue];
+//        int64_t start = FLTCMTimeToMillis(range.start);
+//        [values addObject:@[ @(start), @(start + FLTCMTimeToMillis(range.duration)) ]];
+//      }
+//      _eventSink(@{@"event" : @"bufferingUpdate", @"values" : values});
+//    }
+//  } else if (context == statusContext) {
+//    AVPlayerItem *item = (AVPlayerItem *)object;
+//    switch (item.status) {
+//      case AVPlayerItemStatusFailed:
+//        if (_eventSink != nil) {
+//          _eventSink([FlutterError
+//              errorWithCode:@"VideoError"
+//                    message:[@"Failed to load video: "
+//                                stringByAppendingString:[item.error localizedDescription]]
+//                    details:nil]);
+//        }
+//        break;
+//      case AVPlayerItemStatusUnknown:
+//        break;
+//      case AVPlayerItemStatusReadyToPlay:
+//        [item addOutput:_videoOutput];
+//        [self setupEventSinkIfReadyToPlay];
+//        [self updatePlayingState];
+//        break;
+//    }
+//  } else if (context == presentationSizeContext || context == durationContext) {
+//    AVPlayerItem *item = (AVPlayerItem *)object;
+//    if (item.status == AVPlayerItemStatusReadyToPlay) {
+//      // Due to an apparent bug, when the player item is ready, it still may not have determined
+//      // its presentation size or duration. When these properties are finally set, re-check if
+//      // all required properties and instantiate the event sink if it is not already set up.
+//      [self setupEventSinkIfReadyToPlay];
+//      [self updatePlayingState];
+//    }
+//  } else if (context == playbackLikelyToKeepUpContext) {
+//    if ([[_player currentItem] isPlaybackLikelyToKeepUp]) {
+//      [self updatePlayingState];
+//      if (_eventSink != nil) {
+//        _eventSink(@{@"event" : @"bufferingEnd"});
+//      }
+//    }
+//  } else if (context == playbackBufferEmptyContext) {
+//    if (_eventSink != nil) {
+//      _eventSink(@{@"event" : @"bufferingStart"});
+//    }
+//  } else if (context == playbackBufferFullContext) {
+//    if (_eventSink != nil) {
+//      _eventSink(@{@"event" : @"bufferingEnd"});
+//    }
+//  }
 }
 
 - (void)updatePlayingState {
@@ -334,38 +344,38 @@ NS_INLINE UIViewController *rootViewController() {
 
 - (void)setupEventSinkIfReadyToPlay {
   if (_eventSink && !_isInitialized) {
-    AVPlayerItem *currentItem = self.player.currentItem;
-    CGSize size = currentItem.presentationSize;
+//    AVPlayerItem *currentItem = self.player.currentItem;
+    CGSize size = self.player.videoSize;
     CGFloat width = size.width;
     CGFloat height = size.height;
 
     // Wait until tracks are loaded to check duration or if there are any videos.
-    AVAsset *asset = currentItem.asset;
-    if ([asset statusOfValueForKey:@"tracks" error:nil] != AVKeyValueStatusLoaded) {
-      void (^trackCompletionHandler)(void) = ^{
-        if ([asset statusOfValueForKey:@"tracks" error:nil] != AVKeyValueStatusLoaded) {
-          // Cancelled, or something failed.
-          return;
-        }
-        // This completion block will run on an AVFoundation background queue.
-        // Hop back to the main thread to set up event sink.
-        [self performSelector:_cmd onThread:NSThread.mainThread withObject:self waitUntilDone:NO];
-      };
-      [asset loadValuesAsynchronouslyForKeys:@[ @"tracks" ]
-                           completionHandler:trackCompletionHandler];
-      return;
-    }
+//    AVAsset *asset = currentItem.asset;
+//    if ([asset statusOfValueForKey:@"tracks" error:nil] != AVKeyValueStatusLoaded) {
+//      void (^trackCompletionHandler)(void) = ^{
+//        if ([asset statusOfValueForKey:@"tracks" error:nil] != AVKeyValueStatusLoaded) {
+//          // Cancelled, or something failed.
+//          return;
+//        }
+//        // This completion block will run on an AVFoundation background queue.
+//        // Hop back to the main thread to set up event sink.
+//        [self performSelector:_cmd onThread:NSThread.mainThread withObject:self waitUntilDone:NO];
+//      };
+//      [asset loadValuesAsynchronouslyForKeys:@[ @"tracks" ]
+//                           completionHandler:trackCompletionHandler];
+//      return;
+//    }
 
-    BOOL hasVideoTracks = [asset tracksWithMediaType:AVMediaTypeVideo].count != 0;
-    BOOL hasNoTracks = asset.tracks.count == 0;
-
-    // The player has not yet initialized when it has no size, unless it is an audio-only track.
-    // HLS m3u8 video files never load any tracks, and are also not yet initialized until they have
-    // a size.
-    if ((hasVideoTracks || hasNoTracks) && height == CGSizeZero.height &&
-        width == CGSizeZero.width) {
-      return;
-    }
+//    BOOL hasVideoTracks = [asset tracksWithMediaType:AVMediaTypeVideo].count != 0;
+//    BOOL hasNoTracks = asset.tracks.count == 0;
+//
+//    // The player has not yet initialized when it has no size, unless it is an audio-only track.
+//    // HLS m3u8 video files never load any tracks, and are also not yet initialized until they have
+//    // a size.
+//    if ((hasVideoTracks || hasNoTracks) && height == CGSizeZero.height &&
+//        width == CGSizeZero.width) {
+//      return;
+//    }
     // The player may be initialized but still needs to determine the duration.
     int64_t duration = [self duration];
     if (duration == 0) {
@@ -393,23 +403,27 @@ NS_INLINE UIViewController *rootViewController() {
 }
 
 - (int64_t)position {
-  return FLTCMTimeToMillis([_player currentTime]);
+//  return FLTCMTimeToMillis([_player currentTime]);
+    return FLTCMTimeToMillis([_player position]);
 }
 
 - (int64_t)duration {
   // Note: https://openradar.appspot.com/radar?id=4968600712511488
   // `[AVPlayerItem duration]` can be `kCMTimeIndefinite`,
   // use `[[AVPlayerItem asset] duration]` instead.
-  return FLTCMTimeToMillis([[[_player currentItem] asset] duration]);
+//  return FLTCMTimeToMillis([[[_player currentItem] asset] duration]);
+    return FLTCMTimeToMillis([_player duration]);
 }
 
 - (void)seekTo:(int)location {
   // TODO(stuartmorgan): Update this to use completionHandler: to only return
   // once the seek operation is complete once the Pigeon API is updated to a
   // version that handles async calls.
-  [_player seekToTime:CMTimeMake(location, 1000)
-      toleranceBefore:kCMTimeZero
-       toleranceAfter:kCMTimeZero];
+//  [_player seekToTime:CMTimeMake(location, 1000)
+//      toleranceBefore:kCMTimeZero
+//       toleranceAfter:kCMTimeZero];
+    
+    [_player seekTo:CMTimeMake(location, 1000)];
 }
 
 - (void)setIsLooping:(BOOL)isLooping {
@@ -423,25 +437,25 @@ NS_INLINE UIViewController *rootViewController() {
 - (void)setPlaybackSpeed:(double)speed {
   // See https://developer.apple.com/library/archive/qa/qa1772/_index.html for an explanation of
   // these checks.
-  if (speed > 2.0 && !_player.currentItem.canPlayFastForward) {
-    if (_eventSink != nil) {
-      _eventSink([FlutterError errorWithCode:@"VideoError"
-                                     message:@"Video cannot be fast-forwarded beyond 2.0x"
-                                     details:nil]);
-    }
-    return;
-  }
-
-  if (speed < 1.0 && !_player.currentItem.canPlaySlowForward) {
-    if (_eventSink != nil) {
-      _eventSink([FlutterError errorWithCode:@"VideoError"
-                                     message:@"Video cannot be slow-forwarded"
-                                     details:nil]);
-    }
-    return;
-  }
-
-  _player.rate = speed;
+//  if (speed > 2.0 && !_player.currentItem.canPlayFastForward) {
+//    if (_eventSink != nil) {
+//      _eventSink([FlutterError errorWithCode:@"VideoError"
+//                                     message:@"Video cannot be fast-forwarded beyond 2.0x"
+//                                     details:nil]);
+//    }
+//    return;
+//  }
+//
+//  if (speed < 1.0 && !_player.currentItem.canPlaySlowForward) {
+//    if (_eventSink != nil) {
+//      _eventSink([FlutterError errorWithCode:@"VideoError"
+//                                     message:@"Video cannot be slow-forwarded"
+//                                     details:nil]);
+//    }
+//    return;
+//  }
+//
+//  _player.rate = speed;
 }
 
 - (CVPixelBufferRef)copyPixelBuffer {
@@ -481,18 +495,18 @@ NS_INLINE UIViewController *rootViewController() {
 /// so the channel is going to die or is already dead.
 - (void)disposeSansEventChannel {
   _disposed = YES;
-  [_playerLayer removeFromSuperlayer];
+  [_playerLayer.layer removeFromSuperlayer];
   [_displayLink invalidate];
-  AVPlayerItem *currentItem = self.player.currentItem;
-  [currentItem removeObserver:self forKeyPath:@"status"];
-  [currentItem removeObserver:self forKeyPath:@"loadedTimeRanges"];
-  [currentItem removeObserver:self forKeyPath:@"presentationSize"];
-  [currentItem removeObserver:self forKeyPath:@"duration"];
-  [currentItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp"];
-  [currentItem removeObserver:self forKeyPath:@"playbackBufferEmpty"];
-  [currentItem removeObserver:self forKeyPath:@"playbackBufferFull"];
-
-  [self.player replaceCurrentItemWithPlayerItem:nil];
+//  AVPlayerItem *currentItem = self.player.currentItem;
+//  [currentItem removeObserver:self forKeyPath:@"status"];
+//  [currentItem removeObserver:self forKeyPath:@"loadedTimeRanges"];
+//  [currentItem removeObserver:self forKeyPath:@"presentationSize"];
+//  [currentItem removeObserver:self forKeyPath:@"duration"];
+//  [currentItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp"];
+//  [currentItem removeObserver:self forKeyPath:@"playbackBufferEmpty"];
+//  [currentItem removeObserver:self forKeyPath:@"playbackBufferFull"];
+//
+//  [self.player replaceCurrentItemWithPlayerItem:nil];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -659,3 +673,4 @@ NS_INLINE UIViewController *rootViewController() {
 }
 
 @end
+
