@@ -204,14 +204,19 @@ NS_INLINE UIViewController *rootViewController() {
   if ([headers count] != 0) {
     options = @{@"AVURLAssetHTTPHeaderFieldsKey" : headers};
   }
+    NSLog(@"init player");
+
   _player = [[IVSPlayer alloc] init];
-    
+    NSLog(@"player = %@", _player);
     _player.delegate = self;
-    NSLog(@"play url: %@", url);
+        _playerLayer.player = _player;
+            NSLog(@"_playerLayer %@", _playerLayer);
+            NSLog(@"_playerLayer.player %@", _playerLayer.player);
+
+    NSLog(@"play url = %@", url);
     [_player load:url];
-    _playerLayer.player = _player;
-    NSLog(@"player: %@", _player);
-    [_player play];
+          [_player play];
+
     [rootViewController().view.layer addSublayer:_playerLayer.playerLayer];
     [self createVideoOutputAndDisplayLink:frameUpdater];
     
@@ -288,12 +293,16 @@ NS_INLINE UIViewController *rootViewController() {
         case IVSPlayerStateIdle:
             break;
         case IVSPlayerStateReady:
+            [self setupEventSinkIfReadyToPlay];
+            [self updatePlayingState];
             break;
         case IVSPlayerStateBuffering:
             _eventSink(@{@"event" : @"bufferingStart"});
             break;
         case IVSPlayerStatePlaying:
             _eventSink(@{@"event" : @"bufferingEnd"});
+//            [self setupEventSinkIfReadyToPlay];
+//            [self updatePlayingState];
             break;
         case IVSPlayerStateEnded:
             [self itemDidPlayToEndTime:nil];
@@ -396,6 +405,8 @@ NS_INLINE UIViewController *rootViewController() {
     CGSize size = self.player.videoSize;
     CGFloat width = size.width;
     CGFloat height = size.height;
+        NSLog(@"videoSize w: %f, h:%f",width,height);
+
 
     // Wait until tracks are loaded to check duration or if there are any videos.
 //    AVAsset *asset = currentItem.asset;
