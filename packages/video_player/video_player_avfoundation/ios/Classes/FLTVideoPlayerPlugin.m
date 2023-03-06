@@ -208,15 +208,18 @@ NS_INLINE UIViewController *rootViewController() {
 
   _player = [[IVSPlayer alloc] init];
     NSLog(@"player = %@", _player);
-    _player.delegate = self;
-    _playerLayer = [[IVSPlayerView alloc] initWithFrame:CGRectMake(0, 0, 320, 480)];
-        _playerLayer.player = _player;
-            NSLog(@"_playerLayer %@", _playerLayer);
-            NSLog(@"_playerLayer.player %@", _playerLayer.player);
 
-    NSLog(@"play url = %@", url);
+    _player.delegate = self;
+    _playerLayer = [[IVSPlayerView alloc] initWithFrame:CGRectMake(100, 100, 200, 200)];
+    _playerLayer.player = _player;
+    
+    NSLog(@"_playerLayer %@", _playerLayer);
+    NSLog(@"_playerLayer.player %@", _playerLayer.player);
+
     [_player load:url];
           [_player play];
+    NSLog(@"play url = %@", url);
+
 
     [rootViewController().view.layer addSublayer:_playerLayer.playerLayer];
     [self createVideoOutputAndDisplayLink:frameUpdater];
