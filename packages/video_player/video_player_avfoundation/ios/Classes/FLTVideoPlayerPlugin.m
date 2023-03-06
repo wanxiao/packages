@@ -70,6 +70,7 @@ static void *playbackBufferFullContext = &playbackBufferFullContext;
   return [self initWithURL:[NSURL fileURLWithPath:path] frameUpdater:frameUpdater httpHeaders:@{}];
 }
 
+
 - (void)addObservers:(AVPlayerItem *)item {
   [item addObserver:self
          forKeyPath:@"loadedTimeRanges"
@@ -209,7 +210,9 @@ NS_INLINE UIViewController *rootViewController() {
     NSLog(@"play url: %@", url);
     [_player load:url];
     _playerLayer.player = _player;
-    [rootViewController().view.layer addSublayer:_playerLayer.layer];
+    NSLog(@"player: %@", _player);
+    [_player play];
+    [rootViewController().view.layer addSublayer:_playerLayer.playerLayer];
     [self createVideoOutputAndDisplayLink:frameUpdater];
     
   return self;
@@ -267,6 +270,50 @@ NS_INLINE UIViewController *rootViewController() {
 //  [asset loadValuesAsynchronouslyForKeys:@[ @"tracks" ] completionHandler:assetCompletionHandler];
 
   return self;
+}
+
+- (void)player:(IVSPlayer *)player didFailWithError:(NSError *)error {
+    NSLog(@"didFailWithError,%@",error.debugDescription);
+
+    _eventSink([FlutterError
+        errorWithCode:@"error"
+              message:[@"Failed to load video: "
+                          stringByAppendingString:[error localizedDescription]]
+              details:nil]);
+}
+
+- (void)player:(IVSPlayer *)player didChangeState:(IVSPlayerState)state {
+    NSLog(@"didChangeState,%ld",(long)state);
+    switch(state) {
+        case IVSPlayerStateIdle:
+            break;
+        case IVSPlayerStateReady:
+            break;
+        case IVSPlayerStateBuffering:
+            _eventSink(@{@"event" : @"bufferingStart"});
+            break;
+        case IVSPlayerStatePlaying:
+            _eventSink(@{@"event" : @"bufferingEnd"});
+            break;
+        case IVSPlayerStateEnded:
+            [self itemDidPlayToEndTime:nil];
+            break;
+    }
+}
+
+- (void)player:(IVSPlayer *)player didChangeDuration:(CMTime)duration {
+    NSLog(@"didChangeDuration");
+    [self setupEventSinkIfReadyToPlay];
+    [self updatePlayingState];
+}
+
+- (void)player:(IVSPlayer *)player didChangeVideoSize:(CGSize)videoSize {
+    NSLog(@"didChangeVideoSize");
+    
+    _playerLayer.videoGravity = player.videoSize.height > player.videoSize.width ? AVLayerVideoGravityResizeAspectFill : AVLayerVideoGravityResizeAspect;
+
+    [self setupEventSinkIfReadyToPlay];
+    [self updatePlayingState];
 }
 
 - (void)observeValueForKeyPath:(NSString *)path
@@ -343,6 +390,7 @@ NS_INLINE UIViewController *rootViewController() {
 }
 
 - (void)setupEventSinkIfReadyToPlay {
+    NSLog(@"setupEventSinkIfReadyToPlay");
   if (_eventSink && !_isInitialized) {
 //    AVPlayerItem *currentItem = self.player.currentItem;
     CGSize size = self.player.videoSize;
@@ -376,6 +424,11 @@ NS_INLINE UIViewController *rootViewController() {
 //        width == CGSizeZero.width) {
 //      return;
 //    }
+      
+      if (height == CGSizeZero.height &&
+          width == CGSizeZero.width) {
+        return;
+      }
     // The player may be initialized but still needs to determine the duration.
     int64_t duration = [self duration];
     if (duration == 0) {
@@ -383,6 +436,12 @@ NS_INLINE UIViewController *rootViewController() {
     }
 
     _isInitialized = YES;
+      NSLog(@"inited: %@",@{
+        @"event" : @"initialized",
+        @"duration" : @(duration),
+        @"width" : @(width),
+        @"height" : @(height)
+      });
     _eventSink(@{
       @"event" : @"initialized",
       @"duration" : @(duration),
