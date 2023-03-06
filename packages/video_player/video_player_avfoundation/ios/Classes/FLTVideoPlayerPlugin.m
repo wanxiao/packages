@@ -209,6 +209,7 @@ NS_INLINE UIViewController *rootViewController() {
   _player = [[IVSPlayer alloc] init];
     NSLog(@"player = %@", _player);
     _player.delegate = self;
+    _playerLayer = [[IVSPlayerView alloc] initWithFrame:CGRectMake(0, 0, 320, 480)];
         _playerLayer.player = _player;
             NSLog(@"_playerLayer %@", _playerLayer);
             NSLog(@"_playerLayer.player %@", _playerLayer.player);
@@ -325,7 +326,7 @@ NS_INLINE UIViewController *rootViewController() {
     [self updatePlayingState];
 }
 
-- (void)observeValueForKeyPath:(NSString *)path
+- (void)observeValueForKeyPath:(NSString *)pathe
                       ofObject:(id)object
                         change:(NSDictionary *)change
                        context:(void *)context {
