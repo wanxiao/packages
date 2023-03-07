@@ -210,7 +210,7 @@ NS_INLINE UIViewController *rootViewController() {
     NSLog(@"player = %@", _player);
 
     _player.delegate = self;
-    _playerLayer = [[IVSPlayerView alloc] initWithFrame:CGRectMake(100, 100, 200, 200)];
+    _playerLayer = [[IVSPlayerView alloc] initWithFrame:CGRectMake(0, 100, 320, 480)];
     _playerLayer.player = _player;
     
     NSLog(@"_playerLayer %@", _playerLayer);
