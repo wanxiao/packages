@@ -210,7 +210,8 @@ NS_INLINE UIViewController *rootViewController() {
     NSLog(@"player = %@", _player);
 
     _player.delegate = self;
-    _playerLayer = [[IVSPlayerView alloc] initWithFrame:CGRectMake(0, 100, 320, 480)];
+    _playerLayer = [[IVSPlayerView alloc] initWithFrame:CGRectZero];
+    _playerLayer.backgroundColor = [UIColor yellowColor];
     _playerLayer.player = _player;
     
     NSLog(@"_playerLayer %@", _playerLayer);
@@ -324,7 +325,8 @@ NS_INLINE UIViewController *rootViewController() {
     NSLog(@"didChangeVideoSize");
     
     _playerLayer.videoGravity = player.videoSize.height > player.videoSize.width ? AVLayerVideoGravityResizeAspectFill : AVLayerVideoGravityResizeAspect;
-
+    NSLog(@"_playerLayer video size %@", NSStringFromCGSize(player.videoSize));
+    
     [self setupEventSinkIfReadyToPlay];
     [self updatePlayingState];
 }
